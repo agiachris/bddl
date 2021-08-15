@@ -1,5 +1,7 @@
+import copy
 import random
 import os
+import networkx as nx
 
 from bddl.parsing import parse_domain, parse_problem, gen_natural_language_conditions
 from bddl.condition_evaluation import create_scope, compile_state, evaluate_state, get_ground_state_options
@@ -7,6 +9,16 @@ from bddl.condition_evaluation import create_scope, compile_state, evaluate_stat
 import numpy as np
 from bddl.object_taxonomy import ObjectTaxonomy
 
+unary_edge_types = [
+    'cooked',
+    'dusty'
+]
+
+binary_edge_types = [
+    'ontop',
+    'under',
+    'inside',
+]
 
 class BEHAVIORActivityInstance(object):
 
@@ -51,6 +63,104 @@ class BEHAVIORActivityInstance(object):
         self.current_goal_status = {"satisfied": [], "unsatisfied": []}
         self.natural_language_goal_conditions = gen_natural_language_conditions(
             self.parsed_goal_conditions)
+        self.gen_graph_states()
+
+    def gen_graph_states(self):
+        graph_skeleton = nx.MultiGraph()
+        for obj_id, obj in enumerate(self.object_scope):
+            category, _, identifier = obj.split('.')
+            synset_class, instance = identifier.split('_')
+            obj_attrs = {
+                "category": category,
+                "identifier": instance,
+                "synset_class": synset_class,
+                "raw_identifier": obj,
+                "type": "object",
+                }
+            graph_skeleton.add_node(obj_id)
+            graph_skeleton.nodes[obj_id].update(obj_attrs)
+
+        self.initial_graph = self.add_initial_conditions_to_graph(
+            copy.deepcopy(graph_skeleton), self.parsed_initial_conditions)
+        # self.goal_graph = self.add_goal_conditions_to_graph(
+        #     copy.deepcopy(graph_skeleton), self.parsed_goal_conditions)
+            
+    def add_initial_conditions_to_graph(self, graph, conditions):
+        identifier_to_node = nx.get_node_attributes(graph, "raw_identifier")
+        identifier_to_node = {value: key for key, value in identifier_to_node.items()}
+        for cond in conditions:
+            if len(cond) == 3:
+                if cond[0] == "inroom":
+                    rooms = nx.get_node_attributes(graph, "room")
+                    rooms = {value: key for key, value in rooms.items()}
+                    obj = identifier_to_node[cond[1]]
+                    room = cond[2]
+                    if room not in rooms:
+                        room_node_id = graph.number_of_nodes()
+                        graph.add_node(room_node_id)
+                        graph.nodes[room_node_id].update({
+                            "room": room,
+                            "type": "room",
+                        })
+                    else:
+                        room_node_id = rooms[room]
+                    graph.add_edge(obj, room_node_id, relation="inroom")
+                else:
+                    edge_type = cond[0]
+                    obj_1 = identifier_to_node[cond[1]]
+                    obj_2 = identifier_to_node[cond[2]]
+                    graph.add_edge(obj_1, obj_2, relation=edge_type)
+            elif len(cond) == 2:
+                graph.nodes[identifier_to_node[cond[1]]].update(
+                    {cond[0]: True})
+        return graph
+
+    # def add_goal_conditions_to_graph(self, graph, conditions):
+    #     identifier_to_node = nx.get_node_attributes(graph, "raw_identifier")
+    #     identifier_to_node = {value: key for key, value in identifier_to_node.items()}
+
+    #     categories = nx.get_node_attributes(graph, "category")
+    #     nodes_per_category = {}
+    #     for key, value in categories.items():
+    #         if value not in nodes_per_category:
+    #             nodes_per_category[value] = [key]
+    #         else:
+    #             nodes_per_category[value].append(key)
+
+    #     for cond in conditions:
+    #         import pdb; pdb.set_trace()
+    #         if cond[0] == "or":
+    #             import pdb; pdb.set_trace()
+    #         elif cond[0] == "and":
+    #             import pdb; pdb.set_trace()
+    #         elif cond[0] == "forall":
+    #             obj_category = cond[1][-1].split('.')
+                    
+    #             import pdb; pdb.set_trace()
+    #         elif len(cond) == 3:
+    #             if cond[0] == "inroom":
+    #                 rooms = nx.get_node_attributes(graph, "room")
+    #                 rooms = {value: key for key, value in rooms.items()}
+    #                 obj = identifier_to_node[cond[1]]
+    #                 room = cond[2]
+    #                 if room not in rooms:
+    #                     room_node_id = graph.number_of_nodes()
+    #                     graph.add_node(room_node_id)
+    #                     graph.nodes[room_node_id].update({
+    #                         "room": room,
+    #                         "type": "room",
+    #                     })
+    #                 else:
+    #                     room_node_id = rooms[room]
+    #                 graph.add_edge(obj, room_node_id, relation="inroom")
+    #             else:
+    #                 edge_type = cond[0]
+    #                 obj_1 = identifier_to_node[cond[1]]
+    #                 obj_2 = identifier_to_node[cond[2]]
+    #                 graph.add_edge(obj_1, obj_2, relation=edge_type)
+    #         else:
+    #             pass
+    #     return graph
 
     def initialize(self, scene_class, scene_id=None, scene_kwargs=None, online_sampling=True):
         scenes = os.listdir(self.scene_path)
@@ -160,3 +270,10 @@ class BEHAVIORActivityInstance(object):
         self.current_success, self.current_goal_status = evaluate_state(
             self.goal_conditions)
         return self.current_success, self.current_goal_status
+
+if __name__ == "__main__":
+    import bddl
+    bddl.set_backend('iGibson')
+    activity = BEHAVIORActivityInstance(behavior_activity="chopping_vegetables", activity_definition=0, scene_path='/home/michael/Repositories/lab/iGibson/igibson/data/ig_dataset/scenes')
+    import pdb; pdb.set_trace()
+    print(activity)
